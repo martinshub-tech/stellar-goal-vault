@@ -51,8 +51,11 @@ beforeAll(async () => {
 
 beforeEach(() => {
   const db = getDb();
+  db.prepare(`DELETE FROM webhook_dead_letter_queue`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaign_events`).run();
   db.prepare(`DELETE FROM pledges`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaigns`).run();
 });
 
@@ -93,7 +96,7 @@ describe('campaign store search', () => {
 
     expect(listCampaigns({ searchQuery: 'rocket' }).campaigns[0].id).toBe(campaign.id);
     expect(
-      listCampaigns({ searchQuery: 'gaaa' }).campaigns.some((row) => row.id === campaign.id),
+      listCampaigns({ searchQuery: campaign.creator }).campaigns.some((row) => row.id === campaign.id),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
   });
