@@ -56,11 +56,13 @@ describe('Rate Limiter Middleware', () => {
 
     // Second request
     nextCalled = false;
+    (mockReq as any).rateLimitedProcessed = false;
     middleware(mockReq as Request, mockRes as Response, next);
     expect(nextCalled).toBe(true);
 
     // Third request - should exceed limit
     nextCalled = false;
+    (mockReq as any).rateLimitedProcessed = false;
     expect(() => {
       middleware(mockReq as Request, mockRes as Response, next);
     }).toThrow(/Rate limit exceeded/);
