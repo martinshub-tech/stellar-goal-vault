@@ -11,6 +11,7 @@ import path from 'path';
 import { config, walletIntegrationReady } from './config';
 import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
+import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
 import { requestIdMiddleware } from './middleware/requestId';
 import { requestLoggingMiddleware } from './middleware/requestLogging';
 import { validateBody } from './middleware/validateBody';
@@ -169,7 +170,15 @@ if (process.env.NODE_ENV === 'production') {
   app.use(cacheMiddleware(300));
 }
 
-const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+import { LRUCache } from 'lru-cache';
+
+const rateLimitBuckets = new LRUCache<string, { count: number; resetAt: number }>({
+  max: 5000,
+});
+
+export function clearRateLimitCache() {
+  rateLimitBuckets.clear();
+}
 
 export function applyRateLimit(limitOverride?: number) {
   return (req: Request, res: Response, next: express.NextFunction) => {
@@ -181,6 +190,11 @@ export function applyRateLimit(limitOverride?: number) {
 
     // Skip rate limiting when client IP is unavailable (common in test environments)
     if (!req.ip) {
+      return next();
+    }
+
+    // Skip rate limiting for local development to avoid blocking normal workflow
+    if (process.env.NODE_ENV === 'development' || (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test')) {
       return next();
     }
 
