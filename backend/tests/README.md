@@ -28,6 +28,7 @@ npm test
 ```
 
 This will:
+
 1. Discover all `*.test.ts` and `*.integration.ts` files
 2. Start an isolated Express server for each test worker
 3. Execute tests in parallel (up to 4 concurrent threads)
@@ -96,16 +97,19 @@ backend/
 ### Test Discovery
 
 Vitest automatically discovers test files matching these patterns:
+
 - `src/**/*.test.ts` - Unit tests
-- `tests/**/*.test.ts` - Integration tests  
+- `tests/**/*.test.ts` - Integration tests
 - `tests/**/*.integration.ts` - Integration tests
 
 ## Test Scenarios
 
 ### Happy Path
+
 - **Campaign Lifecycle**: Create campaign → Multiple pledges → Reach target → Claim funds → Verify all events recorded
 
 ### Edge Cases
+
 - **Double Claim**: Prevent claiming the same campaign twice
 - **Claim Without Funding**: Prevent claim before reaching target amount
 - **Claim Before Deadline**: Prevent early claims
@@ -115,12 +119,14 @@ Vitest automatically discovers test files matching these patterns:
 - **Double Refund**: Prevent refunding the same contributor twice
 
 ### Authorization & Validation
+
 - **Unauthorized Claim**: Prevent non-creator from claiming
 - **Field Validation**: Ensure all required fields are validated
 - **Pledge Constraints**: Validate pledge amounts and campaign state
 - **Non-existent Campaigns**: Reject all operations on non-existent campaigns
 
 ### State Consistency
+
 - **State Transitions**: Verify correct state changes across operations
 - **Event Ordering**: Ensure events are recorded in correct chronological order
 - **Independent Campaigns**: Verify multiple campaigns don't interfere with each other
@@ -134,6 +140,7 @@ Each test worker gets a dedicated temporary database:
 ```
 
 **Key Features:**
+
 - Databases are automatically created before tests run
 - Databases are automatically cleaned up after tests complete
 - No shared state between tests or test workers
@@ -144,6 +151,7 @@ Each test worker gets a dedicated temporary database:
 ### Why Isolation Matters
 
 Perfect isolation ensures:
+
 - ✅ No test pollution - one test's data doesn't affect another
 - ✅ Parallel execution - tests can safely run simultaneously
 - ✅ CI/CD friendly - consistent results across multiple runs
@@ -167,15 +175,15 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: '18'
-      
+
       - name: Install dependencies
         run: cd backend && npm install
-      
+
       - name: Run integration tests
         run: cd backend && npm test
         env:
           NODE_ENV: test
-      
+
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         if: always()
@@ -195,29 +203,29 @@ jobs:
 
 ```typescript
 // Mock data
-MOCK_CREATORS.alice
-MOCK_CONTRIBUTORS.dave
-MOCK_ASSETS.USDC
+MOCK_CREATORS.alice;
+MOCK_CONTRIBUTORS.dave;
+MOCK_ASSETS.USDC;
 
 // Time helpers
-nowInSeconds()
-generateTxHash()
-sleep(ms)
-roundAmount(value)
+nowInSeconds();
+generateTxHash();
+sleep(ms);
+roundAmount(value);
 
 // API helpers
-createCampaign(apiClient, overrides)
-addPledge(apiClient, campaignId, contributor, amount)
-claimCampaign(apiClient, campaignId, creator)
-refundContributor(apiClient, campaignId, contributor)
-getCampaign(apiClient, campaignId)
-getCampaignHistory(apiClient, campaignId)
+createCampaign(apiClient, overrides);
+addPledge(apiClient, campaignId, contributor, amount);
+claimCampaign(apiClient, campaignId, creator);
+refundContributor(apiClient, campaignId, contributor);
+getCampaign(apiClient, campaignId);
+getCampaignHistory(apiClient, campaignId);
 
 // Assertion helpers
-assertCampaignState(campaign, expectedState)
-assertHistoryContains(history, expectedEvents)
-assertError(response, expectedCode)
-assertSuccess(response)
+assertCampaignState(campaign, expectedState);
+assertHistoryContains(history, expectedEvents);
+assertError(response, expectedCode);
+assertSuccess(response);
 ```
 
 ## Understanding the State Machine
@@ -241,12 +249,12 @@ claimed
 
 ### State Transitions in API
 
-| State | Can Pledge | Can Claim | Can Refund |
-|-------|-----------|----------|-----------|
-| open | ✅ | ❌ | ❌ |
-| funded | ❌ | ✅ | ❌ |
-| failed | ❌ | ❌ | ✅ |
-| claimed | ❌ | ❌ | ❌ |
+| State   | Can Pledge | Can Claim | Can Refund |
+| ------- | ---------- | --------- | ---------- |
+| open    | ✅         | ❌        | ❌         |
+| funded  | ❌         | ✅        | ❌         |
+| failed  | ❌         | ❌        | ✅         |
+| claimed | ❌         | ❌        | ❌         |
 
 ## Troubleshooting
 
@@ -300,6 +308,7 @@ npm test -- --reporter=verbose
 ## Performance Metrics
 
 On a typical machine:
+
 - Total test suite: **< 10 seconds**
 - Per-test average: **100-500ms**
 - Startup/teardown: **< 1 second per worker**
@@ -310,13 +319,14 @@ On a typical machine:
 ### Print Test Details
 
 ```typescript
-it("test name", async () => {
-  console.log("Campaign:", campaign);
-  console.log("History:", history);
+it('test name', async () => {
+  console.log('Campaign:', campaign);
+  console.log('History:', history);
 });
 ```
 
 Run with:
+
 ```bash
 npm test -- --reporter=verbose 2>&1 | grep -A 10 "test name"
 ```
@@ -326,9 +336,9 @@ npm test -- --reporter=verbose 2>&1 | grep -A 10 "test name"
 The test database files are temporary, but you can add debugging code to inspect them:
 
 ```typescript
-const sqlite3 = require("better-sqlite3");
+const sqlite3 = require('better-sqlite3');
 const db = sqlite3(TEST_DB_PATH);
-console.log(db.prepare("SELECT * FROM campaigns").all());
+console.log(db.prepare('SELECT * FROM campaigns').all());
 ```
 
 ## Contributing

@@ -31,16 +31,21 @@ export const logger = pino({
   redact: {
     paths: ['req.headers.authorization', 'headers.authorization', 'address', 'creator'],
     censor: (value: any, path: string[]) => {
-      if (typeof value === 'string' && (path.includes('address') || path.includes('creator')) && value.startsWith('G') && value.length > 50) {
+      if (
+        typeof value === 'string' &&
+        (path.includes('address') || path.includes('creator')) &&
+        value.startsWith('G') &&
+        value.length > 50
+      ) {
         return `${value.slice(0, 5)}...${value.slice(-5)}`;
       }
       return '[REDACTED]';
-    }
+    },
   },
   mixin() {
     const requestId = getRequestId();
     return requestId ? { requestId } : {};
-  }
+  },
 });
 
 export function logInfo(event: string, fields: LogFields, _configuredLevel?: LogLevel): void {
@@ -69,7 +74,7 @@ export function logError(
       message: normalizedError.message,
       stack: normalizedError.stack,
       name: normalizedError.name,
-    }
+    },
   });
 }
 

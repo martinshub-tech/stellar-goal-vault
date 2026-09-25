@@ -96,7 +96,9 @@ describe('campaign store search', () => {
 
     expect(listCampaigns({ searchQuery: 'rocket' }).campaigns[0].id).toBe(campaign.id);
     expect(
-      listCampaigns({ searchQuery: campaign.creator }).campaigns.some((row) => row.id === campaign.id),
+      listCampaigns({ searchQuery: campaign.creator }).campaigns.some(
+        (row) => row.id === campaign.id,
+      ),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
   });
