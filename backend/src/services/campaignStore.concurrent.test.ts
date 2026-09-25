@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { initDb, resetDbForTests } from './db';
 import {
   initCampaignStore,
@@ -105,8 +106,23 @@ describe('Concurrent Pledge Race Condition Tests', () => {
         contributor: CONTRIBUTOR_2,
         amount: 300,
         assetCode: 'USDC',
-      });
-    }).toThrow(/Pledge exceeds campaign funding cap/);
+      }),
+      addPledge(campaignId, {
+        contributor: CONTRIBUTOR_3,
+        amount: 300,
+        assetCode: 'USDC',
+      }),
+    ];
+
+    const results = await Promise.allSettled(pledgePromises);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+
+    // Only one pledge of 300 should succeed, next one will exceed 500 cap
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(2);
+    expect((rejected[0] as PromiseRejectedResult).reason.code).toBe('CAMPAIGN_FUNDING_CAP_EXCEEDED');
 
     const campaign = getCampaign(campaignId);
     expect(campaign).toBeDefined();

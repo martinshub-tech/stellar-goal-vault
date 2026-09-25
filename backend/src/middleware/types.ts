@@ -2,5 +2,7 @@ import { Request } from 'express';
 
 export interface RequestWithId extends Request {
   requestId?: string;
-  id?: string;
+  retryCount?: number;
+  retryReason?: string;
+  finalOutcome?: string;
 }
