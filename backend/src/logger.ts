@@ -217,6 +217,11 @@ export function logRequest(
     status: number;
     durationMs: number;
     headers?: Record<string, string>;
+    ip?: string;
+    userAgent?: string;
+    retryCount?: number;
+    retryReason?: string;
+    finalOutcome?: string;
   },
   _configuredLevel?: LogLevel,
 ): void {
@@ -233,6 +238,11 @@ export function logRequest(
     path: request.path,
     status: request.status,
     duration_ms: durationMs,
+    ip: request.ip,
+    userAgent: request.userAgent,
+    ...(request.retryCount !== undefined ? { retryCount: request.retryCount } : {}),
+    ...(request.retryReason ? { retryReason: request.retryReason } : {}),
+    ...(request.finalOutcome ? { finalOutcome: request.finalOutcome } : {}),
   });
 }
 
