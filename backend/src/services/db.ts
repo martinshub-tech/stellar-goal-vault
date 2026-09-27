@@ -195,11 +195,24 @@ function migrate(database: SQLiteDatabase): void {
       attempts      INTEGER NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
-    CREATE INDEX IF NOT EXISTS idx_pledges_contributor ON pledges(contributor, created_at, id);
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_webhook_dlq_campaign_id ON webhook_dead_letter_queue(campaign_id);
+
+    CREATE TABLE IF NOT EXISTS campaign_comments (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id TEXT NOT NULL,
+      author      TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      created_at  INTEGER NOT NULL,
+      deleted_at  INTEGER,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
   `);
+
+  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
+  // accounting indexes to ensure concrete read/write plans run fast.
+  ensureMigrationRunnerIndexes(database);
 
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
     name: string;
@@ -344,5 +357,78 @@ function migrate(database: SQLiteDatabase): void {
     ON campaign_events(json_extract(blockchain_metadata, '$.txHash'));
     CREATE INDEX IF NOT EXISTS idx_campaign_events_ledger
     ON campaign_events(json_extract(blockchain_metadata, '$.ledgerNumber'));
+  `);
+
+  // Seed-workflow indexes: support FK child discovery during wipe/reseed,
+  // pledged_amount accounting checks, and post-seed listing by created_at.
+  // Only indexes backed by concrete seed + migrate query plans.
+  ensureSeedWorkflowIndexes(database);
+
+  // Query-layer indexes: composite plans for contributor/refund lookups,
+  // campaign event history pages, and soft-deleted comment lists.
+  ensureQueryLayerIndexes(database);
+
+  // Campaigns persistence integrity: CHECK on fresh tables + triggers for
+  // existing DBs (SQLite cannot ADD CHECK via ALTER TABLE).
+  ensureCampaignsIntegrityConstraints(database);
+}
+
+/**
+ * Indexes used by the migration runner (runMigrations) to accelerate backfill,
+ * deduplication, and pledged_amount accounting queries across schema upgrades.
+ * Safe to call repeatedly (IF NOT EXISTS).
+ */
+export function ensureMigrationRunnerIndexes(database: SQLiteDatabase = getDb()): void {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pledges_token_id_null
+      ON pledges(token_id) WHERE token_id IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_refunded
+      ON pledges(campaign_id, refunded_at);
+
+    CREATE INDEX IF NOT EXISTS idx_pledges_tx_hash_migration
+      ON pledges(transaction_hash) WHERE transaction_hash IS NOT NULL;
+  `);
+}
+
+/**
+ * Indexes used by the deterministic seed wipe/reseed path and the accounting
+ * queries that validate seed output. Safe to call repeatedly (IF NOT EXISTS).
+ */
+export function ensureSeedWorkflowIndexes(database: SQLiteDatabase = getDb()): void {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_notifications_campaign_id
+      ON notifications(campaign_id);
+
+    -- #874: active-pledge accounting (SUM/COUNT where refunded_at IS NULL)
+    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_refunded
+      ON pledges(campaign_id, refunded_at);
+
+    -- #874: ordered campaign pledge lists (listCampaignPledges)
+    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_created_id
+      ON pledges(campaign_id, created_at DESC, id DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_campaigns_created_at
+      ON campaigns(created_at);
+  `);
+}
+
+/**
+ * Indexes used by the application query layer (campaignStore / eventHistory /
+ * getPledgesByContributor). Safe to call repeatedly (IF NOT EXISTS).
+ */
+export function ensureQueryLayerIndexes(database: SQLiteDatabase = getDb()): void {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_contributor
+      ON pledges(campaign_id, contributor, refunded_at);
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_timestamp
+      ON campaign_events(campaign_id, timestamp ASC, id ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_created
+      ON campaign_comments(campaign_id, deleted_at, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_source
+      ON campaign_events(json_extract(blockchain_metadata, '$.source'));
   `);
 }
