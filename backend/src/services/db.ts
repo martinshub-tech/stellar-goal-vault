@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-type SQLiteDatabase = ReturnType<typeof Database>;
+export type SQLiteDatabase = ReturnType<typeof Database>;
 
 let db: SQLiteDatabase | null = null;
 
@@ -122,7 +122,88 @@ export function getPledgesByContributor(
   return rows;
 }
 
-function migrate(database: SQLiteDatabase): void {
+
+/**
+ * Install campaigns-persistence integrity enforcement for existing databases.
+ *
+ * SQLite cannot ADD CHECK via ALTER TABLE, so CREATE TABLE CHECKs only apply to
+ * freshly created schemas. Triggers mirror the same safe invariant subset for
+ * databases that already exist, without requiring a destructive rebuild.
+ */
+export function ensureCampaignsIntegrityConstraints(
+  database: SQLiteDatabase = getDb(),
+): void {
+  // Soft-clean cached totals that violate the non-negative invariant so later
+  // accounting UPDATEs succeed under the new rules. Do not invent target/pledge
+  // history — those are application-owned.
+  database.exec(`
+    UPDATE campaigns SET pledged_amount = 0 WHERE pledged_amount < 0;
+  `);
+
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS campaigns_persistence_integrity_insert
+    BEFORE INSERT ON campaigns
+    FOR EACH ROW
+    BEGIN
+      SELECT CASE
+        WHEN NEW.creator IS NULL OR length(trim(NEW.creator)) = 0
+          THEN RAISE(ABORT, 'campaigns.creator must be non-empty')
+        WHEN NEW.title IS NULL OR length(trim(NEW.title)) = 0
+          THEN RAISE(ABORT, 'campaigns.title must be non-empty')
+        WHEN NEW.description IS NULL OR length(trim(NEW.description)) = 0
+          THEN RAISE(ABORT, 'campaigns.description must be non-empty')
+        WHEN NEW.accepted_tokens_json IS NULL OR length(trim(NEW.accepted_tokens_json)) = 0
+          THEN RAISE(ABORT, 'campaigns.accepted_tokens_json must be non-empty')
+        WHEN NEW.target_amount IS NULL OR NEW.target_amount <= 0
+          THEN RAISE(ABORT, 'campaigns.target_amount must be > 0')
+        WHEN NEW.pledged_amount IS NULL OR NEW.pledged_amount < 0
+          THEN RAISE(ABORT, 'campaigns.pledged_amount must be >= 0')
+        WHEN NEW.deadline IS NULL OR NEW.deadline <= 0
+          THEN RAISE(ABORT, 'campaigns.deadline must be > 0')
+        WHEN NEW.created_at IS NULL OR NEW.created_at <= 0
+          THEN RAISE(ABORT, 'campaigns.created_at must be > 0')
+        WHEN NEW.claimed_at IS NOT NULL AND NEW.failed_at IS NOT NULL
+          THEN RAISE(ABORT, 'campaigns cannot be both claimed and failed')
+        WHEN NEW.max_per_contributor IS NOT NULL AND NEW.max_per_contributor < 0
+          THEN RAISE(ABORT, 'campaigns.max_per_contributor must be >= 0')
+      END;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS campaigns_persistence_integrity_update
+    BEFORE UPDATE ON campaigns
+    FOR EACH ROW
+    BEGIN
+      SELECT CASE
+        WHEN NEW.creator IS NULL OR length(trim(NEW.creator)) = 0
+          THEN RAISE(ABORT, 'campaigns.creator must be non-empty')
+        WHEN NEW.title IS NULL OR length(trim(NEW.title)) = 0
+          THEN RAISE(ABORT, 'campaigns.title must be non-empty')
+        WHEN NEW.description IS NULL OR length(trim(NEW.description)) = 0
+          THEN RAISE(ABORT, 'campaigns.description must be non-empty')
+        WHEN NEW.accepted_tokens_json IS NULL OR length(trim(NEW.accepted_tokens_json)) = 0
+          THEN RAISE(ABORT, 'campaigns.accepted_tokens_json must be non-empty')
+        WHEN NEW.target_amount IS NULL OR NEW.target_amount <= 0
+          THEN RAISE(ABORT, 'campaigns.target_amount must be > 0')
+        WHEN NEW.pledged_amount IS NULL OR NEW.pledged_amount < 0
+          THEN RAISE(ABORT, 'campaigns.pledged_amount must be >= 0')
+        WHEN NEW.deadline IS NULL OR NEW.deadline <= 0
+          THEN RAISE(ABORT, 'campaigns.deadline must be > 0')
+        WHEN NEW.created_at IS NULL OR NEW.created_at <= 0
+          THEN RAISE(ABORT, 'campaigns.created_at must be > 0')
+        WHEN NEW.claimed_at IS NOT NULL AND NEW.failed_at IS NOT NULL
+          THEN RAISE(ABORT, 'campaigns cannot be both claimed and failed')
+        WHEN NEW.max_per_contributor IS NOT NULL AND NEW.max_per_contributor < 0
+          THEN RAISE(ABORT, 'campaigns.max_per_contributor must be >= 0')
+      END;
+    END;
+  `);
+}
+
+export function migrate(database: SQLiteDatabase = getDb()): void {
+  database.transaction(() => runMigrations(database))();
+}
+
+export function runMigrations(database: SQLiteDatabase): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id                    TEXT PRIMARY KEY,
@@ -139,6 +220,9 @@ function migrate(database: SQLiteDatabase): void {
       metadata_json         TEXT,
       max_per_contributor   INTEGER
     );
+
+    CREATE INDEX IF NOT EXISTS idx_campaigns_creator ON campaigns(creator);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_deadline ON campaigns(deadline);
 
     -- 🌟 1. Create our new cheat-sheet search index table
     CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
@@ -158,6 +242,11 @@ function migrate(database: SQLiteDatabase): void {
       UPDATE campaigns_fts 
       SET title = new.title, description = new.description 
       WHERE id = old.id;
+    END;
+
+    -- 🔄 4. Automatically delete from the cheat-sheet if a campaign is deleted
+    CREATE TRIGGER IF NOT EXISTS after_campaigns_delete AFTER DELETE ON campaigns BEGIN
+      DELETE FROM campaigns_fts WHERE id = old.id;
     END;
 
     CREATE TABLE IF NOT EXISTS pledges (
@@ -210,10 +299,6 @@ function migrate(database: SQLiteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
   `);
 
-  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
-  // accounting indexes to ensure concrete read/write plans run fast.
-  ensureMigrationRunnerIndexes(database);
-
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
     name: string;
   }>;
@@ -233,10 +318,7 @@ function migrate(database: SQLiteDatabase): void {
     database.exec(`ALTER TABLE pledges ADD COLUMN token_id TEXT`);
   }
 
-  // Backfill token_id for existing pledges where it's still NULL
-  database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
-
-  // Add deleted_at column if not exists
+  // Add failed_at column if not exists
   const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
     name: string;
   }>;
@@ -248,6 +330,18 @@ function migrate(database: SQLiteDatabase): void {
   if (!campaignColumns.some((column) => column.name === 'failed_at')) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN failed_at INTEGER`);
   }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(claimed_at, failed_at, deleted_at);
+  `);
+
+  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
+  // accounting indexes to ensure concrete read/write plans run fast.
+  // Installed after ensuring required columns exist on legacy databases.
+  ensureMigrationRunnerIndexes(database);
+
+  // Backfill token_id for existing pledges where it's still NULL
+  database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
 
   // Migrate asset_code to accepted_tokens_json if needed
   if (
