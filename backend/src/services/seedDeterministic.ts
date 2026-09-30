@@ -219,7 +219,13 @@ export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): s
     );
 
     for (const pledge of pledges) {
-      insertPledge.run(pledge.campaignId, pledge.contributor, pledge.amount, pledge.assetCode, pledge.createdAt);
+      insertPledge.run(
+        pledge.campaignId,
+        pledge.contributor,
+        pledge.amount,
+        pledge.assetCode,
+        pledge.createdAt,
+      );
     }
   })();
 

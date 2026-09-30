@@ -111,9 +111,7 @@ describe('webhookService', () => {
     it('retries on timeout-style connection aborts and records the final timeout in the DLQ', async () => {
       const timeoutError = new Error('timeout of 4000ms exceeded');
       (timeoutError as Error & { code?: string }).code = 'ECONNABORTED';
-      vi.mocked(axios.post)
-        .mockRejectedValueOnce(timeoutError)
-        .mockRejectedValueOnce(timeoutError);
+      vi.mocked(axios.post).mockRejectedValueOnce(timeoutError).mockRejectedValueOnce(timeoutError);
 
       const result = await dispatchWebhook(
         'campaign_failed',

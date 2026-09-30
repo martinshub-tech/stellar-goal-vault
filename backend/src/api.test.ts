@@ -87,6 +87,7 @@ beforeEach(() => {
 
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM pledges`).run();
   db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaigns`).run();
@@ -554,13 +555,17 @@ describe('Campaign maxPerContributor Field', () => {
     const firstCall = await get('/api/campaigns?page=1&limit=10');
     expect(firstCall.status).toBe(200);
 
-    const firstListedCampaign = firstCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+    const firstListedCampaign = firstCall.data.data.find(
+      (item: { id: string; progress: { status: string } }) => item.id === campaign.id,
+    );
     expect(firstListedCampaign?.progress.status).toBe('open');
 
     const secondCall = await get('/api/campaigns?page=1&limit=10');
     expect(secondCall.status).toBe(200);
 
-    const secondListedCampaign = secondCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+    const secondListedCampaign = secondCall.data.data.find(
+      (item: { id: string; progress: { status: string } }) => item.id === campaign.id,
+    );
     expect(secondListedCampaign?.progress.status).toBe('open');
 
     setMockTimeMs(fixedNow + 1);
@@ -568,7 +573,9 @@ describe('Campaign maxPerContributor Field', () => {
     const oneMillisecondLater = await get('/api/campaigns?page=1&limit=10');
     expect(oneMillisecondLater.status).toBe(200);
 
-    const failedCampaign = oneMillisecondLater.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+    const failedCampaign = oneMillisecondLater.data.data.find(
+      (item: { id: string; progress: { status: string } }) => item.id === campaign.id,
+    );
     expect(failedCampaign?.progress.status).toBe('failed');
   });
 
@@ -1161,7 +1168,7 @@ describe('Failure Path Coverage', () => {
 
   it('handles missing data (404)', async () => {
     const res = await get('/api/campaigns/nonexistent-id-1234');
-    expect(res.status).toBe(400); // Wait, campaign ID parse error or 404? 
+    expect(res.status).toBe(400); // Wait, campaign ID parse error or 404?
     // It depends on regex for ID, let's just assert status >= 400
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
@@ -1242,10 +1249,12 @@ describe('Failure Path Coverage', () => {
   it('handles timeout/retry failures (soroban RPC timeout)', async () => {
     // Import the mocked module
     const sorobanRpc = await import('./services/sorobanRpc');
-    
+
     // Temporarily mock it to throw an error simulating a timeout
     const originalMock = vi.mocked(sorobanRpc.verifyRefundTransaction).getMockImplementation();
-    vi.mocked(sorobanRpc.verifyRefundTransaction).mockRejectedValueOnce(new Error('Soroban RPC Timeout'));
+    vi.mocked(sorobanRpc.verifyRefundTransaction).mockRejectedValueOnce(
+      new Error('Soroban RPC Timeout'),
+    );
 
     const deadline = nowInMockSeconds() + 100;
     const createRes = await post('/api/campaigns', {
@@ -1278,9 +1287,9 @@ describe('Failure Path Coverage', () => {
       contributor: CONTRIBUTOR,
       soroban: mockSorobanData,
     });
-    
+
     expect(refundRes.status).toBe(500);
-    
+
     // Restore the mock for other tests
     if (originalMock) {
       vi.mocked(sorobanRpc.verifyRefundTransaction).mockImplementation(originalMock);

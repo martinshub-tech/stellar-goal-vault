@@ -1,7 +1,6 @@
 import pino from 'pino';
 import { getRequestId } from './requestContext';
 
-
 /**
  * Keys that must never appear in logs.
  * Covers auth headers, wallet material, and secret-configuration env/config fields
@@ -44,12 +43,21 @@ export function redactSensitive(value: unknown, depth = 0): unknown {
       const scheme = trimmed.split(/\s+/)[0];
       return `${scheme} [REDACTED]`;
     }
-    if (/^(Authorization|Proxy-Authorization|X-API-Key|X-Wallet-Secret|X-Secret-Key|X-Webhook-Secret)\s*:/i.test(trimmed)) {
+    if (
+      /^(Authorization|Proxy-Authorization|X-API-Key|X-Wallet-Secret|X-Secret-Key|X-Webhook-Secret)\s*:/i.test(
+        trimmed,
+      )
+    ) {
       return trimmed.replace(/:\s*.+$/, ': [REDACTED]');
     }
-    if (/^ghp_[A-Za-z0-9]+/.test(value) || /^gho_[A-Za-z0-9]+/.test(value)) return '[REDACTED_TOKEN]';
+    if (/^ghp_[A-Za-z0-9]+/.test(value) || /^gho_[A-Za-z0-9]+/.test(value))
+      return '[REDACTED_TOKEN]';
     if (/^[a-z][a-z0-9+.-]*:\/\/[^\s]*@[^\s]+/i.test(value)) return redactUrlCredentials(value);
-    if (/[?&](?:token|secret|password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|private[_-]?key|signature)=[^&\s]+/i.test(value)) {
+    if (
+      /[?&](?:token|secret|password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|private[_-]?key|signature)=[^&\s]+/i.test(
+        value,
+      )
+    ) {
       return value.replace(
         /([?&](?:token|secret|password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|private[_-]?key|signature)=)([^&#\s]+)/gi,
         '$1[REDACTED]',
@@ -82,7 +90,10 @@ export function redactSecretConfig(
       if (typeof value === 'string' && value.length === 0) {
         out[key] = '';
       } else if (typeof value === 'string' && key.toUpperCase().includes('API_KEY')) {
-        const count = value.split(',').map((s) => s.trim()).filter(Boolean).length;
+        const count = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean).length;
         out[key] = `[REDACTED:${count} key${count === 1 ? '' : 's'}]`;
       } else if (typeof value === 'string' && /url/i.test(key) && /:\/\//.test(value)) {
         out[key] = redactUrlCredentials(value).replace(/:\/\/[^@]*@/, '://***@');

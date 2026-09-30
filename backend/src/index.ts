@@ -51,6 +51,7 @@ import {
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
 import { startEventIndexer, getIndexerStatus } from './services/eventIndexer';
+import { listNotifications, getUnreadCount, markAllRead } from './services/notificationService';
 import {
   getDeadLetterQueue,
   clearDeadLetterQueue,
@@ -197,7 +198,10 @@ export function applyRateLimit(limitOverride?: number) {
     }
 
     // Skip rate limiting for local development to avoid blocking normal workflow
-    if (process.env.NODE_ENV === 'development' || (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test')) {
+    if (
+      process.env.NODE_ENV === 'development' ||
+      (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test')
+    ) {
       return next();
     }
 
@@ -421,8 +425,7 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
 
     const indexer = getIndexerStatus();
     // Align overall with component.indexer.status (isHealthy includes freshness/lag).
-    const allHealthy =
-      database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
+    const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
 
     const end = process.hrtime(start);
     const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
@@ -498,52 +501,29 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
       sendValidationError(queryResult.issues);
     }
 
-  // Build a stable cache key from the sorted query string
-  const qs = Object.keys(req.query as Record<string, unknown>)
-    .sort()
-    .map((k) => `${k}=${(req.query as Record<string, unknown>)[k]}`)
-    .join('&');
-  const cacheKey = buildCampaignCacheKey(qs);
+    const params = queryResult.data;
 
-  const cached = await getCampaignCacheEntry(cacheKey);
-  if (cached) {
-    const cachedData = JSON.parse(cached) as {
-      data: CampaignListItem[];
-      pagination: { total: number; page: number; limit: number; totalPages: number };
-    };
-    res.setHeader('Cache-Control', 'max-age=30');
-    res.setHeader('X-Cache', 'HIT');
-    res.setHeader('X-Total-Count', String(cachedData.pagination.total));
-    res.setHeader('Content-Type', 'application/json');
-    // The cached payload is shared, but correlation IDs are per request.
-    res.send(JSON.stringify({ ...cachedData, requestId: (req as RequestWithId).requestId }));
-    return;
-  }
+    // Build a stable cache key from the sorted query string
+    const qs = Object.keys(req.query as Record<string, unknown>)
+      .sort()
+      .map((k) => `${k}=${(req.query as Record<string, unknown>)[k]}`)
+      .join('&');
+    const cacheKey = buildCampaignCacheKey(qs);
 
-  const listOptions: ListCampaignsOptions = {
-    searchQuery: params.search || params.q,
-    assetCodes: params.asset,
-    status: params.status,
-    includeDeleted: params.includeDeleted,
-    sort: params.sort,
-    sortOrder: params.order,
-    createdAfter: params.createdAfter,
-    createdBefore: params.createdBefore,
-  };
-  if (params.page !== undefined) {
-    listOptions.page = params.page;
-    listOptions.limit = params.limit;
-  }
-
-  const { campaigns, pledgeCounts, totalCount } = listCampaigns(listOptions);
-
-  // `listCampaigns` already aggregated active pledge counts in SQL for exactly
-  // the rows on this page, so reuse them instead of letting `calculateProgress`
-  // issue one COUNT query per campaign (an N+1 read on the hot list endpoint).
-  const data = campaigns.map((campaign) => ({
-    ...campaign,
-    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
-  }));
+    const cached = await getCampaignCacheEntry(cacheKey);
+    if (cached) {
+      const cachedData = JSON.parse(cached) as {
+        data: CampaignListItem[];
+        pagination: { total: number; page: number; limit: number; totalPages: number };
+      };
+      res.setHeader('Cache-Control', 'max-age=30');
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('X-Total-Count', String(cachedData.pagination.total));
+      res.setHeader('Content-Type', 'application/json');
+      // The cached payload is shared, but correlation IDs are per request.
+      res.send(JSON.stringify({ ...cachedData, requestId: (req as RequestWithId).requestId }));
+      return;
+    }
 
     const listOptions: ListCampaignsOptions = {
       searchQuery: params.search || params.q,
@@ -551,7 +531,7 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
       status: params.status,
       includeDeleted: params.includeDeleted,
       sort: params.sort,
-      order: params.order,
+      sortOrder: params.order,
       createdAfter: params.createdAfter,
       createdBefore: params.createdBefore,
     };
@@ -560,11 +540,14 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
       listOptions.limit = params.limit;
     }
 
-    const { campaigns, totalCount } = listCampaigns(listOptions);
+    const { campaigns, pledgeCounts, totalCount } = listCampaigns(listOptions);
 
+    // `listCampaigns` already aggregated active pledge counts in SQL for exactly
+    // the rows on this page, so reuse them instead of letting `calculateProgress`
+    // issue one COUNT query per campaign (an N+1 read on the hot list endpoint).
     const data = campaigns.map((campaign) => ({
       ...campaign,
-      progress: calculateProgress(campaign),
+      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
     }));
 
     const page = params.page ?? 1;
@@ -584,17 +567,17 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
 
     await setCampaignCacheEntry(cacheKey, responseBody);
 
-  res.setHeader('Cache-Control', 'max-age=30');
-  res.setHeader('X-Cache', 'MISS');
-  res.setHeader('X-Total-Count', String(totalCount));
-  res.setHeader('Content-Type', 'application/json');
-  res.send(
-    JSON.stringify({
-      data,
-      pagination: { total: totalCount, page, limit, totalPages },
-      requestId: (req as RequestWithId).requestId,
-    }),
-  );
+    res.setHeader('Cache-Control', 'max-age=30');
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('X-Total-Count', String(totalCount));
+    res.setHeader('Content-Type', 'application/json');
+    res.send(
+      JSON.stringify({
+        data,
+        pagination: { total: totalCount, page, limit, totalPages },
+        requestId: (req as RequestWithId).requestId,
+      }),
+    );
   } catch (error) {
     next(error);
   }
